@@ -59,8 +59,8 @@ class BlockSupervisor
   # +STDERR+.
   #
   # Note that this is separate from the +FD_CLOEXEC+ flag. If the child process
-  # +exec+s, any FDs that the parent opened with +FD_CLOEXEC+ will not be open
-  # after the +exec+, regardless of whether they're in this list.
+  # calls +exec+, any FDs that the parent opened with +FD_CLOEXEC+ will not be
+  # open after the +exec+, regardless of whether they're in this list.
   #
   # @return [Set<Integer>] not nil
   #
@@ -312,7 +312,7 @@ class BlockSupervisor
   private
 
   #
-  # See {#close_nonstandard_fds}.
+  # See {#close_other_fds}.
   #
   def child_close_other_fds
     # close everything up to RLIMIT_NOFILE
