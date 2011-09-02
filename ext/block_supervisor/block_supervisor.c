@@ -19,9 +19,11 @@
 #ifdef SYS_SUP_DEBUG_TRACING
 #define SYS_SUP_DEBUG(msg) printf(msg)
 #define SYS_SUP_DEBUG1(msg, x1) printf(msg, x1)
+#define SYS_SUP_DEBUG2(msg, x1, x2) printf(msg, x1, x2)
 #else
 #define SYS_SUP_DEBUG(msg) /* do nothing */
 #define SYS_SUP_DEBUG1(msg, x1) /* do nothing */
+#define SYS_SUP_DEBUG2(msg, x1, x2) /* do nothing */
 #endif
 
 /**
@@ -223,43 +225,30 @@ static VALUE block_sup_parent_trace(VALUE self, VALUE child_pid_val)
 }
 
 /**
- * Based on rb_close_before_exec in io.c in ruby-1.9.2p290. The
- * rb_close_before_exec implementation has the advantage of a static variable
- * +max_file_descriptor+ that records the highest FD that ruby has opened. We
- * can't do this, so we leave it up to the caller to specify a maxhint.
+ * Close all file descriptors from +lo_fd_v+ to +hi_fd_v+ inclusive.
  *
- * The approach that geordi takes is to use RLIMIT_NOFILE as soon as the
- * (parent) starts to limit the total to some constant; this constant would be a
- * good maxhint.
+ * @param [Fixnum] hi_fd highest fd to close
+ *
+ * @return [Fixnum] the highest file descriptor that was closed, or -1 if no
+ * file descriptors were closed
  */
-void block_sup_child_close_fds(VALUE lowfd_v, VALUE maxhint_v,
-    VALUE noclose_fds)
+static VALUE block_sup_child_close_fds(VALUE self, VALUE hi_fd)
 {
-    int fd, ret;
-    int max = max_file_descriptor;
-    int lowfd = FIX2INT(lowfd_v);
-    int maxhint = FIX2INT(maxhint_v);
+  int fd, ret;
+  int hi_fd_int = FIX2INT(hi_fd);
+  int max_closed = -1;
+  ID fd_inherited = rb_intern("fd_inherited?");
 
-    if (max < maxhint)
-        max = maxhint;
-    for (fd = lowfd; fd <= max; fd++) {
-        if (!NIL_P(noclose_fds) &&
-            RTEST(rb_hash_lookup(noclose_fds, INT2FIX(fd))))
-            continue;
-#ifdef FD_CLOEXEC
-	ret = fcntl(fd, F_GETFD);
-	if (ret != -1 && !(ret & FD_CLOEXEC)) {
-            fcntl(fd, F_SETFD, ret|FD_CLOEXEC);
-        }
-#else
-	ret = close(fd);
-#endif
-#define CONTIGUOUS_CLOSED_FDS 20
-        if (ret != -1) {
-	    if (max < fd + CONTIGUOUS_CLOSED_FDS)
-		max = fd + CONTIGUOUS_CLOSED_FDS;
-	}
+  for (fd = 0; fd <= hi_fd_int; ++fd) {
+    if (rb_funcall(self, fd_inherited, 1, INT2FIX(fd)) != Qtrue) {
+      ret = close(fd);
+      if (ret != -1) {
+        max_closed = fd;
+      }
     }
+  }
+
+  return INT2FIX(max_closed);
 }
 
 void
@@ -271,6 +260,6 @@ Init_block_supervisor(void)
     rb_define_private_method(klass, "parent_trace",
         block_sup_parent_trace, 1);
     rb_define_private_method(klass, "child_close_fds",
-        block_sup_child_close_fds, 0);
+        block_sup_child_close_fds, 1);
 }
 
