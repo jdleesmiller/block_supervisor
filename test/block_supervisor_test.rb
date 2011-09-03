@@ -77,9 +77,44 @@ class TestBlockSupervisor < Test::Unit::TestCase
       assert_equal "EBADF", out
       assert_equal "", err
     end
+  end
 
-    # check that we haven't leaked FDs from capture
-    assert_equal Set[STDOUT.fileno, STDERR.fileno], s.inherited_fds
+  def test_rlimit_address_space
+    #
+    # try to allocate an array that exceeds the AS (address space) rlimit
+    #
+    big = 50_000_000 # allocate this much
+
+    s = BlockSupervisor.new
+    s.allow_syscalls SYS_mmap2, SYS_munmap, SYS_brk, SYS_mprotect,
+      SYS_rt_sigprocmask, SYS_ugetrlimit, SYS_futex, SYS_write, SYS_close,
+      SYS_rt_sigaction
+    s.setrlimit :AS, big
+    result, out, err = s.capture {
+      begin 
+        too_big = [0] * big
+      rescue NoMemoryError
+        print $!.class
+      end
+      exit! 0
+    }
+    assert_equal BlockSupervisor::ChildExited.new(0), result
+    assert_equal "NoMemoryError", out
+    assert_equal "", err
+  end
+
+  def test_timeout
+    s = BlockSupervisor.new
+    s.timeout = 1
+    s.allow_syscalls SYS_time, SYS_clock_gettime, SYS_gettimeofday, SYS_futex,
+      SYS_rt_sigprocmask, SYS_ugetrlimit, SYS_rt_sigaction, SYS_munmap,
+      SYS_tgkill, SYS_restart_syscall
+    result = s.supervise {
+      sleep 5
+      exit! 0
+    }
+    assert_equal BlockSupervisor::ChildSignaled.new(Signal.list['ALRM']), result
+    assert result.timeout?
   end
 
 #  def test_spawn

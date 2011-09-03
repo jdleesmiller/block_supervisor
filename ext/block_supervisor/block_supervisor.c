@@ -108,6 +108,33 @@ static VALUE block_sup_child_trace(VALUE self) {
 }
 
 /**
+ * Send the child process PTRACE_KILL and wait for it to terminate.
+ */
+static void block_sup_kill_and_wait(pid_t child_pid) {
+  int status; 
+
+  /* we want to kill the child process;
+   * we also want to make sure that we wait for it to die before returning */
+  for (;;) {
+    if (ptrace(PTRACE_KILL, child_pid, NULL, NULL) == -1)
+      rb_sys_fail("PTRACE_KILL failed)");
+
+    if (wait(&status) == -1) {
+      /* if the child process has already been waited (ECHILD), that's fine */
+      if (errno == ECHILD)
+        break;
+
+      /* otherwise, this was unexpected */
+      rb_sys_fail("wait failed when waiting for child process to die");
+    }
+
+    if (WIFEXITED(status) || WIFSIGNALED(status)) {
+      break;
+    }
+  }
+}
+
+/**
  * The tracing code in the parent process.
  *
  * This function initializes ptrace (sets options), and then it selects the
@@ -133,7 +160,7 @@ static VALUE block_sup_parent_trace(VALUE self, VALUE child_pid_val)
 
   /* we assume that we're not in a syscall at the start */
   in_syscall = 0;
-  syscall = 0;
+  syscall = -1;
 
   /* set the TRACESYSGOOD option; it lets us tell the difference between normal
    * traps (which we ignore) and traps caused by a syscall (which we watch) */
@@ -177,51 +204,50 @@ static VALUE block_sup_parent_trace(VALUE self, VALUE child_pid_val)
             rb_sys_fail("PTRACE_PEEKUSER failed on syscall entry");
 
           /* apply the syscall filter */
-          if (!block_sup_trap_syscall_enter(self, child_pid, syscall))
-            break; /* stop tracing and kill the child process */
+          if (!block_sup_trap_syscall_enter(self, child_pid, syscall)) {
+            /* syscall was disallowed; kill the child process and stop */
+            block_sup_kill_and_wait(child_pid);
+
+            return rb_funcall(rb_const_get(klass,
+                  rb_intern("ChildSyscallDisallowed")), rb_intern("new"), 1,
+                LONG2FIX(syscall));
+          }
         } else {
           /* we are now exiting the syscall that we entered above */
-          if (!block_sup_trap_syscall_exit(self, child_pid, syscall))
-            break; /* stop tracing and kill the child process */
+          if (!block_sup_trap_syscall_exit(self, child_pid, syscall)) {
+            /* syscall was disallowed; kill the child process and stop */
+            block_sup_kill_and_wait(child_pid);
 
+            return rb_funcall(rb_const_get(klass,
+                  rb_intern("ChildSyscallDisallowed")), rb_intern("new"), 1,
+                LONG2FIX(syscall));
+          }
+
+          /* now exited; NB: don't clear syscall if killing child process for a
+           * disallowed signal, because we want to return that syscall */
           in_syscall = 0;
-          syscall = 0; /* NB: don't clear syscall if killing child process */
+          syscall = -1;
         }
 
         /* we're still here; continue to next syscall trap */
         if (ptrace(PTRACE_SYSCALL, child_pid, NULL, NULL) == -1)
           rb_sys_fail("PTRACE_SYSCALL failed");
       } else {
-        /* child was stopped by some other signal; send a kill (this is what
-         * geordi does) */
-        SYS_SUP_DEBUG("non-trap stop\n");
-        break;
+        /* child was stopped by some other signal; it may be a SIGALRM from our
+         * timeout code, or it may be something else that we don't expect; in
+         * either case, we kill it (this is what geordi does) */
+        SYS_SUP_DEBUG1("non-trap stop %d\n", WSTOPSIG(status));
+
+        /* we use SIGALRM to set a timeout; kill the child process and stop */
+        block_sup_kill_and_wait(child_pid);
+
+        return rb_funcall(rb_const_get(klass, rb_intern("ChildSignaled")),
+            rb_intern("new"), 1, LONG2FIX(WSTOPSIG(status)));
       }
     }
   }
 
-  /* if we broke out of the loop above, we want to kill the child process;
-   * we also want to make sure that we wait for it to die before returning */
-  for (;;) {
-    if (ptrace(PTRACE_KILL, child_pid, NULL, NULL) == -1)
-      rb_sys_fail("PTRACE_KILL failed)");
-
-    if (wait(&status) == -1) {
-      /* if the child process has already been waited (ECHILD), that's fine */
-      if (errno == ECHILD)
-        break;
-
-      /* otherwise, this was unexpected */
-      rb_sys_fail("wait failed when waiting for child process to die");
-    }
-
-    if (WIFEXITED(status) || WIFSIGNALED(status)) {
-      break;
-    }
-  }
-
-  return rb_funcall(rb_const_get(klass, rb_intern("ChildSyscallDisallowed")),
-          rb_intern("new"), 1, LONG2FIX(syscall));
+  rb_bug("parent broke out of the tracing loop");
 }
 
 /**
@@ -251,6 +277,23 @@ static VALUE block_sup_child_close_fds(VALUE self, VALUE hi_fd)
   return INT2FIX(max_closed);
 }
 
+/**
+ * Set a timeout using alarm(2).
+ *
+ * @param [Fixnum] timeout in seconds, non-negative
+ *
+ * @return [Fixnum] the result from alarm(2)
+ */
+static VALUE block_sup_child_set_timeout(VALUE self, VALUE timeout)
+{
+  unsigned int timeout_uint = FIX2UINT(timeout);
+  unsigned int ret;
+
+  ret = alarm(timeout_uint);
+
+  return INT2FIX(ret);
+}
+
 void
 Init_block_supervisor(void)
 {
@@ -261,5 +304,7 @@ Init_block_supervisor(void)
         block_sup_parent_trace, 1);
     rb_define_private_method(klass, "child_close_fds",
         block_sup_child_close_fds, 1);
+    rb_define_private_method(klass, "child_set_timeout",
+        block_sup_child_set_timeout, 1);
 }
 

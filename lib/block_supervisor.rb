@@ -3,6 +3,11 @@ require 'syscalls'
 require 'block_supervisor/block_supervisor'
 require 'block_supervisor/version'
 
+#
+# For simplicity, this is designed to be a single-use object. Once you call
+# {#supervise} or {#capture}, you should not try to call them again on the same
+# +BlockSupervisor+ object; create a new one instead.
+#
 class BlockSupervisor
   #
   # The child process exited normally.
@@ -10,9 +15,22 @@ class BlockSupervisor
   ChildExited = Struct.new(:exit_code)
 
   #
-  # The child process was terminated by a signal from somewhere else.
+  # The child process received a signal and was killed. This may be a signal
+  # from some other process, or it may be a +SIGALRM+ generated due to the
+  # {#timeout}.
+  #
+  # Note that there is a built-in +Signal+ module that has a list of signal
+  # numbers for the current platform (e.g. <tt>Signal.list['ALRM']</tt>).
   #
   ChildSignaled = Struct.new(:signal)
+  class ChildSignaled
+    #
+    # @return [Boolean] true iff the child got a +SIGALRM+
+    #
+    def timeout?
+      signal == Signal.list['ALRM']
+    end
+  end
 
   #
   # The child process made a disallowed system call ({#syscall_number}) and was
@@ -25,9 +43,11 @@ class BlockSupervisor
     @ignored_syscalls = Set.new
     @inherited_fds = Set[STDIN.fileno, STDOUT.fileno, STDERR.fileno]
     @close_other_fds = true
+    @timeout = nil
     @child_pre_trace = nil
     @parent_pre_trace = nil
     @resource_limits = []
+    @supervise_called = false # enforce single-use policy
     yield self if block_given?
   end 
 
@@ -52,8 +72,7 @@ class BlockSupervisor
 
   #
   # If {#close_other_fds} is true, only these file descriptors will be inherited
-  # by the child process (but see notes for {#close_other_fds} for cautions and
-  # advice on how to make sure this actually works).
+  # by the child process (but see notes for {#close_other_fds} for caveats).
   #
   # By default, the set contains the file descriptors for +STDIN+, +STDOUT+ and
   # +STDERR+.
@@ -78,12 +97,22 @@ class BlockSupervisor
   # The approach we take here is to try to close all file descriptors that are
   # less than (the soft limit for) +RLIMIT_NOFILE+ and not in {#inherited_fds}.
   # This is not perfect. If you open lots of files and then lower
-  # +RLIMIT_NOFILE+, some FDs may remain open and accessible to the child. To
+  # +RLIMIT_NOFILE+, any FDs higher than the new limit will be left open. To
   # avoid this, the approach used by geordi is to set +RLIMIT_NOFILE+ to a
   # sensible number immediately upon starting the (parent) program. The default
-  # +RLIMIT_NOFILE+ seems to be 1024, so this does go through quite a few FDs.
+  # +RLIMIT_NOFILE+ seems to be 1024, so this does go through quite a few FDs if
+  # you don't set a lower limit.
   #
   attr_accessor :close_other_fds
+
+  #
+  # Set a wall-clock timeout on the child process.
+  #
+  # This is accomplished using the +alarm+ system call.
+  #
+  # @return [Integer] in seconds; non-negative
+  #
+  attr_accessor :timeout
 
   #
   # Call the given block from the child process before ptracing, and before
@@ -92,6 +121,8 @@ class BlockSupervisor
   #
   # If this is called multiple times, the blocks are nested (later calls happen
   # first).
+  #
+  # @yield [] runs in the child process
   #
   def child_pre_trace
     old_child_pre_trace = @child_pre_trace
@@ -108,10 +139,14 @@ class BlockSupervisor
   # If this is called multiple times, the blocks are nested (later calls happen
   # first).
   #
+  # @yield [child_pid] runs in the parent process after fork
+  #
+  # @yieldparam [Integer] child_pid process id of the child
+  #
   def parent_pre_trace &block
     old_parent_pre_trace = @parent_pre_trace
-    @parent_pre_trace = proc {
-      yield
+    @parent_pre_trace = proc {|child_pid|
+      yield(child_pid)
       old_parent_pre_trace.call if old_parent_pre_trace
     }
   end
@@ -178,6 +213,10 @@ class BlockSupervisor
   # and later calls the built in <tt>Process.setrlimit</tt> methods from the
   # child process.
   #
+  # Note that if you set +RLIMIT_NOFILE+, this limit is set after any parent
+  # file descriptors are closed, so it does not interfere with
+  # {#close_other_fds}.
+  #
   # @param [String, Symbol] resource passed on to <tt>Process.setrlimit</tt> in
   #        the child process
   #
@@ -192,13 +231,6 @@ class BlockSupervisor
   def setrlimit resource, soft_limit, hard_limit=soft_limit
     @resource_limits << [resource, soft_limit, hard_limit]
     nil
-  end
-
-  #
-  # Run a command using <tt>Kernel.exec</tt> with the configured limits.
-  #
-  def supervise_exec *args
-    supervise { Kernel.exec(*args) }
   end
 
   #
@@ -218,12 +250,22 @@ class BlockSupervisor
   #
   def supervise
     raise "supervise must be given a block" unless block_given?
+    
+    # check that we're only called once
+    raise "supervise can't be called twice on one instance" if @supervise_called
+    @supervise_called = true
 
     child_pid = fork {
       # prevent file descriptors from being inherited, if requested
       child_close_other_fds if close_other_fds 
 
-      # TODO apply resource limits
+      # apply resource limits
+      @resource_limits.each do |lim|
+        Process.setrlimit(*lim)
+      end
+
+      # set timeout
+      child_set_timeout timeout if timeout
 
       # give the caller a chance to get in before tracing
       @child_pre_trace.call if @child_pre_trace
@@ -236,7 +278,7 @@ class BlockSupervisor
     }
 
     # give the caller a chance to get in before tracing
-    @parent_pre_trace.call if @parent_pre_trace
+    @parent_pre_trace.call(child_pid) if @parent_pre_trace
 
     # call into native tracing code for the parent
     parent_trace(child_pid)
@@ -263,8 +305,7 @@ class BlockSupervisor
     err_r, err_w = IO.pipe
 
     # the child should NOT close the write ends of the pipes, but it should
-    # close the read ends; we don't want to leak these fds, so keep original set
-    old_inherited_fds = @inherited_fds.dup
+    # close the read ends
     inherit_fds(*[out_w, err_w].map(&:fileno))
     
     # use the pre_trace handlers to set up the pipes on the child...
@@ -275,7 +316,7 @@ class BlockSupervisor
     end
 
     # ... and the parent
-    parent_pre_trace do
+    parent_pre_trace do |child_pid|
       # close the child end of the pipes from the parent
       [out_w, err_w].each(&:close)
     end
@@ -295,19 +336,8 @@ class BlockSupervisor
       [result, out_r.read, err_r.read]
     ensure
       [out_r, err_r].each(&:close)
-
-      # forget about the FDs we added above
-      @inherited_fds = old_inherited_fds
     end
   end
-
-#  def spawn *args
-#    supervise {
-#      spawn_pid = Process.spawn(*args)
-#      Process.wait(spawn_pid)
-#      exit! $?.exitstatus
-#    }
-#  end
 
   private
 
