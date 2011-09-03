@@ -1,8 +1,6 @@
 require 'block_supervisor'
 require 'test/unit'
 
-#puts Dir.entries('/proc/self/fd')
-
 class TestBlockSupervisor < Test::Unit::TestCase
   include Syscalls
 
@@ -56,13 +54,11 @@ class TestBlockSupervisor < Test::Unit::TestCase
     # open a file on the parent; the child should not be able to find it by fd
     #
     s = BlockSupervisor.new
+    s.restrict_syscalls = false
 
     # check that we can change the set; we won't need STDIN, so we can close it
     s.inherited_fds.delete STDIN.fileno
     assert_equal Set[STDOUT.fileno, STDERR.fileno], s.inherited_fds
-
-    # for_fd needs some syscalls 
-    s.allow_syscalls SYS_fcntl64, SYS_rt_sigprocmask, SYS_ioctl, SYS_write
 
     File.open(__FILE__, 'r') do |f|
       result, out, err = s.capture {
@@ -86,9 +82,7 @@ class TestBlockSupervisor < Test::Unit::TestCase
     big = 50_000_000 # allocate this much
 
     s = BlockSupervisor.new
-    s.allow_syscalls SYS_mmap2, SYS_munmap, SYS_brk, SYS_mprotect,
-      SYS_rt_sigprocmask, SYS_ugetrlimit, SYS_futex, SYS_write, SYS_close,
-      SYS_rt_sigaction
+    s.restrict_syscalls = false
     s.setrlimit :AS, big
     result, out, err = s.capture {
       begin 
@@ -106,9 +100,7 @@ class TestBlockSupervisor < Test::Unit::TestCase
   def test_timeout
     s = BlockSupervisor.new
     s.timeout = 1
-    s.allow_syscalls SYS_time, SYS_clock_gettime, SYS_gettimeofday, SYS_futex,
-      SYS_rt_sigprocmask, SYS_ugetrlimit, SYS_rt_sigaction, SYS_munmap,
-      SYS_tgkill, SYS_restart_syscall
+    s.restrict_syscalls = false
     result = s.supervise {
       sleep 5
       exit! 0
@@ -116,14 +108,7 @@ class TestBlockSupervisor < Test::Unit::TestCase
     assert_equal BlockSupervisor::ChildSignaled.new(Signal.list['ALRM']), result
     assert result.timeout?
   end
-
-#  def test_spawn
-#    s = BlockSupervisor.new
-#    s.allow_syscalls SYS_pipe, SYS_fcntl64, SYS_rt_sigprocmask, SYS_futex,
-#      SYS_clone, SYS_close, SYS_read, SYS_waitpid
-#    result = s.spawn('ls')
-#    p result
-#    p Syscalls::SYS_NAME[result.syscall_number] rescue nil
-#  end
 end
+
+#    p Syscalls::SYS_NAME[result.syscall_number] rescue nil
 

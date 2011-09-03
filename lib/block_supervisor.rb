@@ -12,7 +12,7 @@ class BlockSupervisor
   #
   # The child process exited normally.
   #
-  ChildExited = Struct.new(:exit_code)
+  ChildExited = Struct.new(:exit_status)
 
   #
   # The child process received a signal and was killed. This may be a signal
@@ -41,6 +41,7 @@ class BlockSupervisor
   def initialize
     @allowed_syscalls = Set[Syscalls::SYS_exit_group]
     @ignored_syscalls = Set.new
+    @restrict_syscalls = true
     @inherited_fds = Set[STDIN.fileno, STDOUT.fileno, STDERR.fileno]
     @close_other_fds = true
     @timeout = nil
@@ -69,6 +70,17 @@ class BlockSupervisor
   # @return [Set<Integer>] not nil
   #
   attr_reader :ignored_syscalls 
+
+  #
+  # If true, use +ptrace+ to restrict the system calls that the child can; see
+  # {#allowed_syscalls} and {#ignored_syscalls}.
+  #
+  # The {#child_pre_trace} and {#parent_pre_trace} blocks are called regardless
+  # of whether this setting is true.
+  #
+  # @return [Boolean] true iff child syscalls will be restricted
+  #
+  attr_accessor :restrict_syscalls
 
   #
   # If {#close_other_fds} is true, only these file descriptors will be inherited
@@ -271,7 +283,7 @@ class BlockSupervisor
       @child_pre_trace.call if @child_pre_trace
 
       # call into native code to start tracing
-      child_trace
+      child_trace if restrict_syscalls
 
       # we are now being ptraced; run the caller's block
       yield
@@ -281,7 +293,20 @@ class BlockSupervisor
     @parent_pre_trace.call(child_pid) if @parent_pre_trace
 
     # call into native tracing code for the parent
-    parent_trace(child_pid)
+    if restrict_syscalls
+      parent_trace(child_pid)
+    else
+      Process.wait(child_pid)
+      if $?.exited?
+        ChildExited.new($?.exitstatus)
+      elsif $?.signaled?
+        ChildSignaled.new($?.termsig)
+      elsif $?.stopped?
+        ChildSignaled.new($?.stopsig)
+      else
+        raise "unexpected exit status: #{$?.inspect}"
+      end
+    end
   end
   
   #
