@@ -14,7 +14,7 @@
 /**
  * Define SYS_SUP_DEBUG_TRACING to enable print statements for debugging.
  */
-#define SYS_SUP_DEBUG_TRACING
+/*#define SYS_SUP_DEBUG_TRACING*/
 
 #ifdef SYS_SUP_DEBUG_TRACING
 #define SYS_SUP_DEBUG(msg) printf(msg)
