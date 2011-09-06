@@ -1,32 +1,44 @@
 = block_supervisor
 
-* TODO url
+* https://github.com/jdleesmiller/block_supervisor
 
 == SYNOPSIS
 
-TODO description
+Run a block in a child process with a restricted set of syscalls (using ptrace),
+a restricted set of file descriptors, and fixed resource limits (using rlimits).
+Only works on Linux.
+
+The techniques used here are based on those of geordi
+(htts://github.com/Eelis/geordi), the C++ eval bot. Here they're provided as a
+general purpose library.
 
 === Usage
 
-  TODO (code sample of usage)
+TODO
 
 == REQUIREMENTS
 
-* TODO (list of requirements)
+Tested on:
+* ruby 1.9.2p290 (2011-07-09 revision 32553) [i686-linux] (debian squeeze)
 
 == INSTALLATION
 
-  sudo gem install block_supervisor
+  gem install block_supervisor
 
 == DEVELOPMENT
 
-TODO developer advice
+Get the source from github (http://github.com/jdleesmiller/block_supervisor) and
+use bundler to get the development dependencies:
+
+  gem install bundler
+  bundle
+  rake -T # list development tasks
 
 == LICENSE
 
 (The MIT License)
 
-Copyright (c) 2011 TODO
+Copyright (c) 2011 John Lees-Miller
 
 Permission is hereby granted, free of charge, to any person obtaining
 a copy of this software and associated documentation files (the

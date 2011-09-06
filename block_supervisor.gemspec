@@ -11,7 +11,7 @@ Gem::Specification.new do |s|
   s.authors           = ['John Lees-Miller']
   s.email             = ['jdleesmiller@gmail.com']
   s.homepage          = 'http://github.com/jdleesmiller/block_supervisor'
-  s.summary           = %q{Run a block with limited syscalls, resources and file handles.}
+  s.summary           = %q{Run a block with control over syscalls, resources and file handles.}
   s.description       = %q{Run a block in a child process with a restricted set of syscalls (using ptrace), a restricted set of file descriptors, and fixed resource limits (using rlimits). Only works on Linux.}
 
   s.rubyforge_project = 'block_supervisor'
