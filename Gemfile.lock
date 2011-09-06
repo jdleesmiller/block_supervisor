@@ -4,11 +4,6 @@ PATH
     block_supervisor (0.0.1)
       syscalls (~> 1.0.0)
 
-PATH
-  remote: ../syscalls_ruby
-  specs:
-    syscalls (1.0.0)
-
 GEM
   remote: http://rubygems.org/
   specs:
@@ -23,6 +18,7 @@ GEM
     minitest (2.5.1)
     rake (0.9.2)
     rdoc (3.9.4)
+    syscalls (1.0.0)
     yard (0.7.2)
 
 PLATFORMS
@@ -31,4 +27,3 @@ PLATFORMS
 DEPENDENCIES
   block_supervisor!
   gemma (~> 2.0.0)
-  syscalls!
