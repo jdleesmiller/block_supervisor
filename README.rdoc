@@ -23,7 +23,9 @@ Tested on:
 
 == INSTALLATION
 
+Will one day be as simple as:
   gem install block_supervisor
+but for now you have to download the source (see below).
 
 == DEVELOPMENT
 
