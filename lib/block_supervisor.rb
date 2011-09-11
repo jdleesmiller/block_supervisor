@@ -45,6 +45,8 @@ class BlockSupervisor
     @inherited_fds = Set[STDIN.fileno, STDOUT.fileno, STDERR.fileno]
     @close_other_fds = true
     @timeout = nil
+    @silence_stdout = false
+    @silence_stderr = false
     @child_pre_trace = nil
     @parent_pre_trace = nil
     @resource_limits = []
@@ -125,6 +127,20 @@ class BlockSupervisor
   # @return [Integer] in seconds; non-negative
   #
   attr_accessor :timeout
+
+  #
+  # Map the child's stdout stream to <tt>/dev/null</tt>.
+  #
+  # @return [Boolean]
+  #
+  attr_accessor :silence_stdout
+
+  #
+  # Map the child's stderr stream to <tt>/dev/null</tt>.
+  #
+  # @return [Boolean]
+  #
+  attr_accessor :silence_stderr
 
   #
   # Call the given block from the child process before ptracing, and before
@@ -270,6 +286,10 @@ class BlockSupervisor
     child_pid = fork {
       # prevent file descriptors from being inherited, if requested
       child_close_other_fds if close_other_fds 
+
+      # silence stdout and stderr
+      $stdout.reopen('/dev/null', 'w') if silence_stdout
+      $stderr.reopen('/dev/null', 'w') if silence_stderr
 
       # apply resource limits
       @resource_limits.each do |lim|

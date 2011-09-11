@@ -36,6 +36,17 @@ use bundler to get the development dependencies:
   bundle
   rake -T # list development tasks
 
+== KNOWN ISSUES
+
+If the supervised process is allowed to fork, and the (parent) supervised
+process is killed, the child becomes orphaned, and it is allowed to continue
+running. I'm not sure whether it's also free from tracing, but I imagine that it
+is. (I've only tested this when ptrace is turned off.) This can happen in some
+subtle ways: an exec like
+  exec "my_app 1>/dev/null"
+replaces the child process with a +sh+ process, which in turn spawns +my_app+; a
+timeout, for example, will then kill +sh+ but not +my_app+.
+
 == LICENSE
 
 (The MIT License)
