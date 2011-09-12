@@ -47,6 +47,15 @@ subtle ways: an exec like
 replaces the child process with a +sh+ process, which in turn spawns +my_app+; a
 timeout, for example, will then kill +sh+ but not +my_app+.
 
+== RELATED
+
++slave+ helps to ensure that a child process is killed when its parent is
+killed, which is something that this library doesn't handle very well, at
+present.
+
+* http://www.ruby-forum.com/topic/141150
+* http://codeforpeople.com/lib/ruby/slave/
+
 == LICENSE
 
 (The MIT License)
