@@ -4,3 +4,7 @@ pkg/*
 .bundle
 /rcov
 /rdoc
+/ext/**/Makefile
+/ext/**/*.o
+/ext/**/*.so
+/lib/**/*.so
