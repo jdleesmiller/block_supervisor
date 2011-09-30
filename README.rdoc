@@ -9,7 +9,7 @@ a restricted set of file descriptors, and fixed resource limits (using rlimits).
 Only works on Linux.
 
 The techniques used here are based on those of geordi
-(htts://github.com/Eelis/geordi), the C++ eval bot. Here they're provided as a
+(http://github.com/Eelis/geordi), the C++ eval bot. Here they're provided as a
 general purpose library.
 
 === Usage
