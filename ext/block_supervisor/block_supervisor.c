@@ -263,10 +263,14 @@ static VALUE block_sup_child_close_fds(VALUE self, VALUE hi_fd)
   int fd, ret;
   int hi_fd_int = FIX2INT(hi_fd);
   int max_closed = -1;
+  int reserved = 0;
   ID fd_inherited = rb_intern("fd_inherited?");
 
   for (fd = 0; fd <= hi_fd_int; ++fd) {
-    if (rb_funcall(self, fd_inherited, 1, INT2FIX(fd)) != Qtrue) {
+#ifdef HAVE_RB_RESERVED_FD_P /* added in ruby 1.9.3 */
+    reserved = rb_reserved_fd_p(fd);
+#endif
+    if (!reserved && rb_funcall(self, fd_inherited, 1, INT2FIX(fd)) != Qtrue) {
       ret = close(fd);
       if (ret != -1) {
         max_closed = fd;
