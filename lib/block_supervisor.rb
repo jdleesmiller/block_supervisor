@@ -210,7 +210,8 @@ class BlockSupervisor
   end
 
   #
-  # @param [Fixnum] syscall_number syscall number (e.g. {Syscalls.SYS_open})
+  # @param [Fixnum] syscall_number syscall number (e.g.
+  #        <tt>Syscalls.SYS_open</tt>)
   #
   # @return [Boolean] true iff the given syscall is in {#allowed_syscalls}
   #
@@ -219,7 +220,8 @@ class BlockSupervisor
   end
 
   #
-  # @param [Fixnum] syscall_number syscall number (e.g. {Syscalls.SYS_open})
+  # @param [Fixnum] syscall_number syscall number (e.g.
+  #        <tt>Syscalls.SYS_open</tt>)
   #
   # @return [Boolean] true iff the given syscall is in {#ignored_syscalls}
   #
