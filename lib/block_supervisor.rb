@@ -45,8 +45,8 @@ class BlockSupervisor
     @inherited_fds = Set[STDIN.fileno, STDOUT.fileno, STDERR.fileno]
     @close_other_fds = true
     @timeout = nil
-    @silence_stdout = false
-    @silence_stderr = false
+    @child_stdout = $stdout
+    @child_stderr = $stderr
     @child_pre_trace = nil
     @parent_pre_trace = nil
     @resource_limits = []
@@ -85,8 +85,8 @@ class BlockSupervisor
   attr_accessor :restrict_syscalls
 
   #
-  # If {#close_other_fds} is true, only these file descriptors will be inherited
-  # by the child process (but see notes for {#close_other_fds} for caveats).
+  # If {#close_other_fds} is true, these file descriptors will be inherited
+  # by the child process; see notes for {#close_other_fds}.
   #
   # By default, the set contains the file descriptors for +STDIN+, +STDOUT+ and
   # +STDERR+.
@@ -100,8 +100,8 @@ class BlockSupervisor
   attr_reader :inherited_fds 
 
   #
-  # Before running the supervised block, close any file descriptors not in the
-  # {#inherited_fds} set; the default is +true+.
+  # Before running the supervised block, close any file descriptor for which
+  # {#fd_inherited?} is false; the default is +true+.
   #
   # To do this, we have to close all of the other file descriptors. Linux does
   # not seem to help us very much here; see
@@ -109,13 +109,13 @@ class BlockSupervisor
   # and the discussion for the geordi bot (in EvalCxx.hsc).
   #
   # The approach we take here is to try to close all file descriptors that are
-  # less than (the soft limit for) +RLIMIT_NOFILE+ and not in {#inherited_fds}.
-  # This is not perfect. If you open lots of files and then lower
-  # +RLIMIT_NOFILE+, any FDs higher than the new limit will be left open. To
-  # avoid this, the approach used by geordi is to set +RLIMIT_NOFILE+ to a
-  # sensible number immediately upon starting the (parent) program. The default
-  # +RLIMIT_NOFILE+ seems to be 1024, so this does go through quite a few FDs if
-  # you don't set a lower limit.
+  # less than (the soft limit for) +RLIMIT_NOFILE+ and for which
+  # {#fd_inherited?} is false.  This is not perfect. If you open lots of files
+  # and then lower +RLIMIT_NOFILE+, any FDs higher than the new limit will be
+  # left open. To avoid this, the approach used by geordi is to set
+  # +RLIMIT_NOFILE+ to a sensible number immediately upon starting the (parent)
+  # program. The default +RLIMIT_NOFILE+ seems to be 1024, so this does go
+  # through quite a few FDs if you don't set a lower limit.
   #
   attr_accessor :close_other_fds
 
@@ -129,18 +129,24 @@ class BlockSupervisor
   attr_accessor :timeout
 
   #
-  # Map the child's stdout stream to <tt>/dev/null</tt>.
+  # Reopen the child's stdout stream to this stream. If nil, the child's stdout
+  # stream is reopened to <tt>/dev/null</tt>. If not nil, the corresponding +fd+
+  # is inherited. Defaults to the <tt>$stdout</tt> of the parent process (reopen
+  # is not called, in this case).
   #
-  # @return [Boolean]
+  # @return [IO, nil]
   #
-  attr_accessor :silence_stdout
+  attr_accessor :child_stdout
 
   #
-  # Map the child's stderr stream to <tt>/dev/null</tt>.
+  # Reopen the child's stderr stream to this stream. If nil, the child's stderr
+  # stream is reopened to <tt>/dev/null</tt>. If not nil, the corresponding +fd+
+  # is inherited. Defaults to the <tt>$stderr</tt> of the parent process (reopen
+  # is not called, in this case).
   #
-  # @return [Boolean]
+  # @return [IO, nil]
   #
-  attr_accessor :silence_stderr
+  attr_accessor :child_stderr
 
   #
   # Call the given block from the child process before ptracing, and before
@@ -230,12 +236,17 @@ class BlockSupervisor
   end
 
   #
+  # Whether the child will inherit the given fd. True if the fd is in
+  # {#inherited_fds} or is one of {#child_stdout} or {#child_stderr}.
+  #
   # @param [Fixnum] fd file descriptor (e.g. 1 for stdout)
   #
   # @return [Boolean] true iff the given file descriptor is in {#inherited_fds}
   #
   def fd_inherited? fd
-    @inherited_fds.member?(fd)
+    @inherited_fds.member?(fd) ||
+      (child_stdout && child_stdout.fileno == fd) ||
+      (child_stderr && child_stderr.fileno == fd)
   end
 
   #
@@ -289,9 +300,14 @@ class BlockSupervisor
       # prevent file descriptors from being inherited, if requested
       child_close_other_fds if close_other_fds 
 
-      # silence stdout and stderr
-      $stdout.reopen('/dev/null', 'w') if silence_stdout
-      $stderr.reopen('/dev/null', 'w') if silence_stderr
+      # redirect stdout and stderr
+      [[$stdout,child_stdout],[$stderr,child_stderr]].each do |child_io, new_io|
+        if new_io.nil?
+          child_io.reopen('/dev/null', 'w')
+        elsif child_io != new_io
+          child_io.reopen(new_io)
+        end
+      end
 
       # apply resource limits
       @resource_limits.each do |lim|
@@ -335,10 +351,16 @@ class BlockSupervisor
   # Run the given block in a child process under ptrace (like {#supervise}), and
   # capture the standard out and standard error streams.
   #
-  # Note that this function can't currently handle large amounts of output: it's
-  # limited by the pipe buffer size. If the child tries to write more than the
-  # pipe buffer size, it will hang. This will hopefully be fixed in the future
-  # (need separate threads for tracing and reading).
+  # This works by setting {#child_stdout} and {#child_stderr} to a pair of
+  # pipes. If you set +child_stdout+ or +child_stderr+ before calling this
+  # method, it has no effect.
+  #
+  # This function can't currently handle large amounts of output: it's limited
+  # by the pipe buffer size. If the child tries to write more than the pipe
+  # buffer size, it will hang. This will hopefully be fixed in the future (need
+  # separate threads for tracing and reading). If you have a lot of output, you
+  # can set {#child_stdout} and {#child_stderr} to temporary files and then read
+  # them back in.
   #
   # @return [result, stdout, stderr] result is one of the return codes from
   #         {#supervise}; stdout is the captured stdout output of the child as a
@@ -353,14 +375,8 @@ class BlockSupervisor
 
     # the child should NOT close the write ends of the pipes, but it should
     # close the read ends
-    inherit_fds(*[out_w, err_w].map(&:fileno))
-    
-    # use the pre_trace handlers to set up the pipes on the child...
-    child_pre_trace do
-      # redirect stdout and stderr before tracing
-      $stdout.reopen(out_w)
-      $stderr.reopen(err_w)
-    end
+    self.child_stdout = out_w
+    self.child_stderr = err_w
 
     # ... and the parent
     parent_pre_trace do |child_pid|

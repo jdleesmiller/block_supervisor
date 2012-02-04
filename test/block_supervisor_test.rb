@@ -1,5 +1,6 @@
 require 'block_supervisor'
 require 'test/unit'
+require 'tempfile'
 
 class TestBlockSupervisor < Test::Unit::TestCase
   include Syscalls
@@ -107,6 +108,45 @@ class TestBlockSupervisor < Test::Unit::TestCase
     }
     assert_equal BlockSupervisor::ChildSignaled.new(Signal.list['ALRM']), result
     assert result.timeout?
+  end
+
+  def test_silence_streams
+    s = BlockSupervisor.new
+    s.restrict_syscalls = false
+    s.child_stdout = nil
+    s.child_stderr = nil
+    result = s.supervise {
+      $stdout.puts "this should not show up in the test output"
+      $stderr.puts "this should not show up in the test output"
+      exit! 0
+    }
+    assert_equal BlockSupervisor::ChildExited.new(0), result
+  end
+
+  def test_redirect_streams
+    s = BlockSupervisor.new
+    s.restrict_syscalls = false
+
+    begin
+      o = Tempfile.new('out')
+      e = Tempfile.new('err')
+      s.child_stdout = o
+      s.child_stderr = e
+      s.inherit_fds o.fileno, e.fileno
+      result = s.supervise {
+        $stdout.puts "OUT"
+        $stderr.puts "ERR"
+        $stdout.flush
+        $stderr.flush
+        exit! 0
+      }
+      assert_equal BlockSupervisor::ChildExited.new(0), result
+      assert_equal "OUT", File.read(o.path).strip
+      assert_equal "ERR", File.read(e.path).strip
+    ensure
+      o.close
+      e.close
+    end
   end
 end
 

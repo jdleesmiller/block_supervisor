@@ -2,9 +2,13 @@
 pkg/*
 *.gem
 .bundle
+.rvmrc
 /rcov
 /rdoc
+/.yardoc
+/yard
 /ext/**/Makefile
 /ext/**/*.o
 /ext/**/*.so
+/ext/**/*.log
 /lib/**/*.so
