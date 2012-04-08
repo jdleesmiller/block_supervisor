@@ -48,6 +48,8 @@ class TestBlockSupervisor < Test::Unit::TestCase
       exit! 0
     }
     assert_equal BlockSupervisor::ChildSyscallDisallowed.new(SYS_getpid), result
+    assert_equal "<BlockSupervisor::ChildSyscallDisallowed: 20 (SYS_getpid)>",
+      result.inspect
   end
 
   def test_fds_are_closed

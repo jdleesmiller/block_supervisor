@@ -36,7 +36,12 @@ class BlockSupervisor
   # The child process made a disallowed system call ({#syscall_number}) and was
   # therefore killed.
   #
-  ChildSyscallDisallowed = Struct.new(:syscall_number)
+  ChildSyscallDisallowed = Struct.new(:syscall_number) do
+    def inspect
+      name = Syscalls::SYS_NAME[syscall_number] rescue '?'
+      "<#{self.class}: #{syscall_number} (#{name})>"
+    end
+  end
 
   def initialize
     @allowed_syscalls = Set[Syscalls::SYS_exit_group]
