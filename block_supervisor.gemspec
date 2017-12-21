@@ -17,7 +17,7 @@ Gem::Specification.new do |s|
   s.rubyforge_project = 'block_supervisor'
 
   s.add_runtime_dependency 'syscalls', '~> 1.0.0'
-  s.add_development_dependency 'gemma', '~> 2.4.0'
+  s.add_development_dependency 'gemma'
 
   s.files       = Dir.glob('lib/**/*.rb') +
                   Dir.glob('ext/**/*{.rb,.c,.h}') + %w(README.rdoc)
