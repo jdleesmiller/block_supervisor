@@ -414,7 +414,7 @@ class BlockSupervisor
   #
   def child_close_other_fds
     # close everything up to RLIMIT_NOFILE
-    hi_fd, hi_fd_hard = Process.getrlimit(:NOFILE)
+    hi_fd, _hi_fd_hard = Process.getrlimit(:NOFILE)
     raise "RLIMIT_NOFILE is negative" if hi_fd < 0
 
     # call into native code to actually close the fds
