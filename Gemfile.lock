@@ -23,7 +23,7 @@ GEM
     powerpack (0.1.1)
     rainbow (3.0.0)
     rake (13.0.1)
-    rdoc (6.0.0)
+    rdoc (6.3.2)
     rubocop (0.52.0)
       parallel (~> 1.10)
       parser (>= 2.4.0.2, < 3.0)
